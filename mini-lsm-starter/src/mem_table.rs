@@ -94,7 +94,14 @@ impl MemTable {
         // bytes::Byte is similar to Arc<[u8]>, clone is cheap
         let key_bytes = Bytes::copy_from_slice(_key);
         let value_bytes = Bytes::copy_from_slice(_value);
+
+        self.approximate_size.fetch_add(
+            key_bytes.len() + value_bytes.len(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
         self.map.insert(key_bytes, value_bytes);
+
         Ok(())
     }
 

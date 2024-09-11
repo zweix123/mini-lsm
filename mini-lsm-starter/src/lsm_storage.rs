@@ -279,13 +279,9 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        let state = self.state.read(); // Arc.read() == 只读锁
-
-        // 检查当前 memtable
-        if let Some(value) = state.memtable.get(_key) {
+        if let Some(value) = self.state.read().memtable.get(_key) {
             return Ok(Some(value));
         }
-
         Ok(None)
     }
 
@@ -296,11 +292,24 @@ impl LsmStorageInner {
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
+        // put things into the memtable, checks capacity, and drop the read lock on LSM state
+        if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+            let state_lock = self.state_lock.lock();
+            if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+                self.force_freeze_memtable(&state_lock)?;
+            }
+        }
         self.state.write().memtable.put(_key, _value)
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, _key: &[u8]) -> Result<()> {
+        if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+            let state_lock = self.state_lock.lock();
+            if self.state.read().memtable.approximate_size() >= self.options.target_sst_size {
+                self.force_freeze_memtable(&state_lock)?;
+            }
+        }
         self.state.write().memtable.put(_key, b"")
     }
 
@@ -326,7 +335,15 @@ impl LsmStorageInner {
 
     /// Force freeze the current memtable to an immutable memtable
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        unimplemented!()
+        let mut state = self.state.write();
+        let memtable = std::mem::replace(
+            &mut Arc::make_mut(&mut state).memtable,
+            Arc::new(MemTable::create(self.next_sst_id())),
+        );
+        Arc::make_mut(&mut state).imm_memtables.insert(0, memtable);
+        self.next_sst_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     /// Force flush the earliest-created immutable memtable to disk
