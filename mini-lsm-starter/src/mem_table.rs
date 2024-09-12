@@ -1,5 +1,6 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
+use core::fmt;
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::AtomicUsize;
@@ -79,10 +80,7 @@ impl MemTable {
     /// Get a value by key.
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
         // 链式调用会有短路行为, 假如前面出现表达式变成None(pl的角度说, 虽然其是nil, 但是类型还在, 后面的表达式才能调用), 那么后面就不会执行
-        self.map
-            .get(_key)
-            .filter(|v| !v.value().is_empty())
-            .map(|v| v.value().clone())
+        self.map.get(_key).map(|v| v.value().clone())
     }
 
     /// Put a key-value pair into the mem-table.
